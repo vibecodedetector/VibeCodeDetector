@@ -114,11 +114,35 @@ export default function NewScanPage() {
 
         setLoading(true);
 
-        // Simulate API call - would actually call /api/scans
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        try {
+            const response = await fetch('/api/scan', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    url,
+                    scanTypes: selectedTypes,
+                }),
+            });
 
-        // In real implementation, this would create a scan and redirect to its page
-        router.push('/dashboard/scans/demo');
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Scan failed');
+            }
+
+            // Redirect to the scan results page
+            if (data.scanId) {
+                router.push(`/dashboard/scans/${data.scanId}`);
+            } else {
+                // Fallback to scans list if no ID returned
+                router.push('/dashboard/scans');
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'An error occurred');
+            setLoading(false);
+        }
     }
 
     return (
@@ -189,8 +213,8 @@ export default function NewScanPage() {
                                         key={type.id}
                                         onClick={() => !isPro && toggleScanType(type.id)}
                                         className={`relative p-4 rounded-lg border-2 transition-all cursor-pointer ${isSelected
-                                                ? 'border-primary bg-primary/5'
-                                                : 'border-border hover:border-muted-foreground/50'
+                                            ? 'border-primary bg-primary/5'
+                                            : 'border-border hover:border-muted-foreground/50'
                                             } ${isPro ? 'opacity-60 cursor-not-allowed' : ''}`}
                                     >
                                         {isPro && (
