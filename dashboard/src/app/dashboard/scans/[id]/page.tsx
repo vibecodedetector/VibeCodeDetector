@@ -1,8 +1,9 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import {
     ArrowLeft,
     ExternalLink,
@@ -16,43 +17,6 @@ import {
     Download,
     RefreshCw,
 } from 'lucide-react';
-
-// Demo scan data - would come from Supabase
-const scan = {
-    id: 'demo',
-    url: 'myapp.vercel.app',
-    status: 'completed',
-    createdAt: '2026-01-31T15:00:00Z',
-    completedAt: '2026-01-31T15:00:28Z',
-    scanTypes: ['security', 'seo', 'api_keys'],
-    results: {
-        security: {
-            score: 68,
-            findings: [
-                { severity: 'critical', title: 'Missing Content-Security-Policy header', description: 'CSP header not found. This helps prevent XSS attacks.' },
-                { severity: 'high', title: 'X-Frame-Options header missing', description: 'Without this header, your site may be vulnerable to clickjacking.' },
-                { severity: 'high', title: 'No rate limiting detected', description: 'API endpoints may be vulnerable to brute force attacks.' },
-                { severity: 'medium', title: 'Referrer-Policy not set', description: 'Consider setting a strict referrer policy.' },
-                { severity: 'medium', title: 'Permissions-Policy missing', description: 'This header controls browser features.' },
-            ],
-        },
-        seo: {
-            score: 78,
-            findings: [
-                { severity: 'medium', title: 'Meta description too short', description: 'Current length: 45 chars. Recommended: 120-160 chars.' },
-                { severity: 'medium', title: 'Missing Open Graph image', description: 'Add og:image for better social sharing.' },
-                { severity: 'low', title: 'No structured data found', description: 'Consider adding JSON-LD schema for rich snippets.' },
-            ],
-        },
-        api_keys: {
-            score: 60,
-            findings: [
-                { severity: 'critical', title: 'AWS Access Key exposed', description: 'Found AKIA... pattern in bundle.js. Revoke immediately!' },
-                { severity: 'medium', title: 'Supabase anon key in client code', description: 'This is expected but ensure RLS policies are configured.' },
-            ],
-        },
-    },
-};
 
 function getScoreColor(score: number) {
     if (score >= 80) return 'text-green-500';
@@ -93,17 +57,54 @@ const scannerNames = {
     api_keys: 'API Key Detector',
 };
 
-export default function ScanDetailsPage() {
-    const overallScore = Math.round(
-        (scan.results.security.score + scan.results.seo.score + scan.results.api_keys.score) / 3
-    );
+// Define minimal types for the JSONB structure
+interface ScanFinding {
+    severity: string;
+    title: string;
+    description: string;
+    [key: string]: any;
+}
 
+interface ScanResultItem {
+    score: number;
+    findings: ScanFinding[];
+}
+
+export default async function ScanDetailsPage({ params }: { params: { id: string } }) {
+    const supabase = await createClient();
+
+    const { data: scan, error } = await supabase
+        .from('scans')
+        .select('*')
+        .eq('id', params.id)
+        .single();
+
+    if (error || !scan) {
+        console.error('Error fetching scan:', error);
+        return notFound();
+    }
+
+    const results = scan.results as Record<string, ScanResultItem>;
+
+    // Aggregate counts
     const totalFindings = {
-        critical: 2,
-        high: 2,
-        medium: 4,
-        low: 1,
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
     };
+
+    Object.values(results).forEach((result: any) => {
+        if (result.findings && Array.isArray(result.findings)) {
+            result.findings.forEach((f: any) => {
+                const sev = f.severity?.toLowerCase();
+                if (sev === 'critical') totalFindings.critical++;
+                else if (sev === 'high') totalFindings.high++;
+                else if (sev === 'medium') totalFindings.medium++;
+                else totalFindings.low++; // Treat 'low', 'info', etc as low or ignore
+            });
+        }
+    });
 
     return (
         <div className="p-8">
@@ -120,9 +121,9 @@ export default function ScanDetailsPage() {
                 <div className="flex justify-between items-start">
                     <div>
                         <div className="flex items-center gap-3 mb-2">
-                            <h1 className="text-3xl font-bold">{scan.url}</h1>
+                            <h1 className="text-3xl font-bold">{scan.url.replace(/^https?:\/\//, '')}</h1>
                             <a
-                                href={`https://${scan.url}`}
+                                href={scan.url.startsWith('http') ? scan.url : `https://${scan.url}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-muted-foreground hover:text-foreground"
@@ -133,9 +134,9 @@ export default function ScanDetailsPage() {
                         <div className="flex items-center gap-4 text-sm text-muted-foreground">
                             <div className="flex items-center gap-1">
                                 <Clock className="h-4 w-4" />
-                                Scanned on Jan 31, 2026 at 3:00 PM
+                                Scanned on {new Date(scan.completed_at || scan.created_at).toLocaleString()}
                             </div>
-                            <Badge variant="secondary">Completed in 28s</Badge>
+                            <Badge variant="secondary">{scan.status}</Badge>
                         </div>
                     </div>
 
@@ -154,31 +155,34 @@ export default function ScanDetailsPage() {
 
             {/* Score Overview */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                <Card className={getScoreBg(overallScore)}>
+                <Card className={getScoreBg(scan.overall_score || 0)}>
                     <CardContent className="pt-6 text-center">
-                        <div className={`text-5xl font-bold ${getScoreColor(overallScore)}`}>
-                            {overallScore}
+                        <div className={`text-5xl font-bold ${getScoreColor(scan.overall_score || 0)}`}>
+                            {scan.overall_score}
                         </div>
                         <p className="text-sm text-muted-foreground mt-2">Overall Score</p>
                     </CardContent>
                 </Card>
 
-                {Object.entries(scan.results).map(([key, result]) => {
-                    const Icon = scannerIcons[key as keyof typeof scannerIcons];
+                {Object.entries(results).map(([key, result]) => {
+                    const Icon = scannerIcons[key as keyof typeof scannerIcons] || AlertTriangle;
+                    // Handle case where result might be an error object or missing score
+                    const score = typeof result.score === 'number' ? result.score : 0;
+
                     return (
                         <Card key={key}>
                             <CardContent className="pt-6">
                                 <div className="flex items-center justify-between mb-2">
                                     <Icon className="h-5 w-5 text-muted-foreground" />
-                                    <span className={`text-2xl font-bold ${getScoreColor(result.score)}`}>
-                                        {result.score}
+                                    <span className={`text-2xl font-bold ${getScoreColor(score)}`}>
+                                        {score}
                                     </span>
                                 </div>
                                 <p className="text-sm text-muted-foreground">
-                                    {scannerNames[key as keyof typeof scannerNames]}
+                                    {scannerNames[key as keyof typeof scannerNames] || key}
                                 </p>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {result.findings.length} issues found
+                                    {result.findings?.length || 0} issues found
                                 </p>
                             </CardContent>
                         </Card>
@@ -215,8 +219,11 @@ export default function ScanDetailsPage() {
             </Card>
 
             {/* Detailed Results by Scanner */}
-            {Object.entries(scan.results).map(([key, result]) => {
-                const Icon = scannerIcons[key as keyof typeof scannerIcons];
+            {Object.entries(results).map(([key, result]) => {
+                const Icon = scannerIcons[key as keyof typeof scannerIcons] || AlertTriangle;
+                const score = typeof result.score === 'number' ? result.score : 0;
+
+                if (!result.findings || result.findings.length === 0) return null;
 
                 return (
                     <Card key={key} className="mb-6">
@@ -225,18 +232,18 @@ export default function ScanDetailsPage() {
                                 <div className="flex items-center gap-3">
                                     <Icon className="h-6 w-6" />
                                     <div>
-                                        <CardTitle>{scannerNames[key as keyof typeof scannerNames]}</CardTitle>
+                                        <CardTitle>{scannerNames[key as keyof typeof scannerNames] || key}</CardTitle>
                                         <CardDescription>{result.findings.length} issues found</CardDescription>
                                     </div>
                                 </div>
-                                <div className={`text-3xl font-bold ${getScoreColor(result.score)}`}>
-                                    {result.score}/100
+                                <div className={`text-3xl font-bold ${getScoreColor(score)}`}>
+                                    {score}/100
                                 </div>
                             </div>
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-4">
-                                {result.findings.map((finding, index) => {
+                                {result.findings.map((finding: any, index: number) => {
                                     const styles = getSeverityStyles(finding.severity);
                                     const SeverityIcon = styles.icon;
 
@@ -257,6 +264,16 @@ export default function ScanDetailsPage() {
                                                     <p className="text-sm text-muted-foreground">
                                                         {finding.description}
                                                     </p>
+                                                    {finding.recommendation && (
+                                                        <p className="text-sm mt-2 text-muted-foreground font-medium">
+                                                            Recommendation: {finding.recommendation}
+                                                        </p>
+                                                    )}
+                                                    {finding.evidence && (
+                                                        <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-x-auto">
+                                                            {finding.evidence}
+                                                        </pre>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
