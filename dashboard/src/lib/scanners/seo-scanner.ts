@@ -1,7 +1,17 @@
 import { load } from 'cheerio';
 
+export interface ScanFinding {
+    title: string;
+    description: string;
+    severity: string;
+    recommendation?: string;
+    evidence?: string;
+}
+
 export interface SEOScanResult {
     url: string;
+    score: number;
+    findings: ScanFinding[];
     scores: {
         seo: number;
         performance: number;
@@ -106,8 +116,18 @@ export async function runSEOScan(url: string): Promise<SEOScanResult> {
         const impactOrder = { critical: 0, high: 1, medium: 2, low: 3 };
         recommendations.sort((a, b) => impactOrder[a.impact] - impactOrder[b.impact]);
 
+        // Map recommendations to findings format
+        const findings: ScanFinding[] = recommendations.map(rec => ({
+            title: rec.title,
+            description: rec.description,
+            severity: rec.impact,
+            recommendation: 'Fix the issue described above.'
+        }));
+
         return {
             url: targetUrl,
+            score: scores.seo, // Top-level score for compatibility
+            findings,          // Top-level findings for compatibility
             scores,
             audits,
             recommendations: recommendations.slice(0, 10),
@@ -215,8 +235,17 @@ async function runLocalSEOScan(url: string, apiErrorMsg: string): Promise<SEOSca
             displayValue: `API Error: ${apiErrorMsg.substring(0, 50)}...`
         });
 
+        const findings: ScanFinding[] = recommendations.map(rec => ({
+            title: rec.title,
+            description: rec.description,
+            severity: rec.impact,
+            recommendation: 'Fix the issue described'
+        }));
+
         return {
             url,
+            score,       // Top-level score
+            findings,    // Top-level findings
             scores: {
                 seo: score,
                 performance: 0, // Cannot measure locally
